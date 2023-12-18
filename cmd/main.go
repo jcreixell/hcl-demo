@@ -39,7 +39,9 @@ type User struct {
 }
 
 type Yo struct {
-	Mama string `hcl:"mama" cty:"mama"`
+	Type       string `hcl:"type,label" cty:"type"`
+	Identifier string `hcl:"name,label" cty:"identifier"`
+	Mama       string `hcl:"mama" cty:"mama"`
 }
 
 // String prints out a pretty version of the user struct

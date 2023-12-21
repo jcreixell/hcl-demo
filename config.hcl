@@ -11,7 +11,8 @@ yo "sometype" "somename" {
     mama = "so fat"
 }
 
-pepe = "Hello ${config.yo.mama} ${config.yo.type} ${config.yo.identifier}!"
+pepe = "Hello %{ if config.yo.mama != "" }${config.yo.mama}%{ else }unnamed%{ endif } ${config.yo.type} ${config.yo.identifier}!"
+
 
 // Example of two user blocks. These will be handled as a slice of users in the `Configuration`
 // struct.

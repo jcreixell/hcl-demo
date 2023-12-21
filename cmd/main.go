@@ -18,52 +18,43 @@ component1 "yo" {
 }
 
 component1 "yo2" {
-	enabled = component1_yo_exports_enabled
+	enabled = !component1_yo_exports_enabled
 }
 `
 
-// Configuration is the top-level struct that contains attributes and blocks defined within
-// an `hcl` file.
-type Configuration struct {
-	Remain hcl.Body `hcl:",remain"`
-}
-
-type ComponentNode struct {
-	ID            string
-	ComponentType reflect.Type
-	ConfigType    reflect.Type
-	Schema        hcl.BodySchema
-}
+// -------- Component Interfaces -----------
 
 type ComponentConfig interface{}
 
 type Component interface {
-	GetID() string
+	GetName() string
 	Update(string, ComponentConfig)
 	Run()
 	Exports() map[string]cty.Value
 }
+
+// -------- Component Definitions -----------
 
 type Component1Config struct {
 	Enabled bool `hcl:"enabled,optional" cty:"enabled"`
 }
 
 type Component1 struct {
-	ID     string
+	Name   string
 	Config Component1Config
 }
 
-func (c *Component1) Update(ID string, config ComponentConfig) {
-	c.ID = ID
+func (c *Component1) Update(Name string, config ComponentConfig) {
+	c.Name = Name
 	c.Config = config.(Component1Config)
 }
 
-func (c *Component1) GetID() string {
-	return c.ID
+func (c *Component1) GetName() string {
+	return c.Name
 }
 
 func (c *Component1) Run() {
-	fmt.Printf("Component1: ID -> %s, Config -> %v\n", c.ID, c.Config)
+	fmt.Printf("Component1: Name -> %s, Config -> %v, Exports -> %v\n", c.Name, c.Config, c.Exports())
 }
 
 func (c *Component1) Exports() map[string]cty.Value {
@@ -76,6 +67,19 @@ func (c *Component1) Exports() map[string]cty.Value {
 	return map[string]cty.Value{
 		"enabled": val,
 	}
+}
+
+// -------- Component Schemas -----------
+
+type Configuration struct {
+	Remain hcl.Body `hcl:",remain"`
+}
+
+type ComponentNode struct {
+	ID            string
+	ComponentType reflect.Type
+	ConfigType    reflect.Type
+	Schema        hcl.BodySchema
 }
 
 var componentNodeTypes = map[string]ComponentNode{
@@ -94,8 +98,6 @@ var componentNodeTypes = map[string]ComponentNode{
 	},
 }
 
-var components = []Component{}
-
 var configSchema hcl.BodySchema
 
 func init() {
@@ -103,6 +105,12 @@ func init() {
 		configSchema.Blocks = append(configSchema.Blocks, component.Schema.Blocks...)
 	}
 }
+
+// -------- Global State -----------
+
+var components = []Component{}
+
+// -------- Main logic -----------
 
 func main() {
 	parser := hclparse.NewParser()
@@ -149,7 +157,7 @@ func main() {
 		components = append(components, component)
 
 		for name, attr := range component.Exports() {
-			ctx.Variables[fmt.Sprintf("%v_%v_exports_%v", componentNode.ID, component.GetID(), name)] = attr
+			ctx.Variables[fmt.Sprintf("%v_%v_exports_%v", componentNode.ID, component.GetName(), name)] = attr
 		}
 	}
 

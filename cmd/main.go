@@ -17,8 +17,9 @@ component1 "yo" {
 	enabled = true
 }
 
-component1 "yo2" {
+component2 "yo2" {
 	enabled = !component1_yo_exports_enabled
+	message = component1_yo_exports_enabled ? "yo is enabled" : "yo is disabled"
 }
 `
 
@@ -33,10 +34,10 @@ type Component interface {
 	Exports() map[string]cty.Value
 }
 
-// -------- Component Definitions -----------
+// ----------- Component 1 --------------
 
 type Component1Config struct {
-	Enabled bool `hcl:"enabled,optional" cty:"enabled"`
+	Enabled bool `hcl:"enabled,optional"`
 }
 
 type Component1 struct {
@@ -69,6 +70,50 @@ func (c *Component1) Exports() map[string]cty.Value {
 	}
 }
 
+// ----------- Component 2 --------------
+
+type Component2Config struct {
+	Enabled bool   `hcl:"enabled,optional"`
+	Message string `hcl:"message,optional"`
+}
+
+type Component2 struct {
+	Name   string
+	Config Component2Config
+}
+
+func (c *Component2) Update(Name string, config ComponentConfig) {
+	c.Name = Name
+	c.Config = config.(Component2Config)
+}
+
+func (c *Component2) GetName() string {
+	return c.Name
+}
+
+func (c *Component2) Run() {
+	fmt.Printf("Component2: Name -> %s, Config -> %v, Exports -> %v\n", c.Name, c.Config, c.Exports())
+}
+
+func (c *Component2) Exports() map[string]cty.Value {
+	enabledType, err := gocty.ImpliedType(c.Config.Enabled)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	messageType, err := gocty.ImpliedType(c.Config.Message)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	enabled, _ := gocty.ToCtyValue(c.Config.Enabled, enabledType)
+	message, _ := gocty.ToCtyValue(c.Config.Message, messageType)
+	return map[string]cty.Value{
+		"enabled": enabled,
+		"message": message,
+	}
+}
+
 // -------- Component Schemas -----------
 
 type Configuration struct {
@@ -91,6 +136,19 @@ var componentNodeTypes = map[string]ComponentNode{
 			Blocks: []hcl.BlockHeaderSchema{
 				{
 					Type:       "component1",
+					LabelNames: []string{"name"},
+				},
+			},
+		},
+	},
+	"component2": {
+		ID:            "component2",
+		ComponentType: reflect.TypeOf(Component2{}),
+		ConfigType:    reflect.TypeOf(Component2Config{}),
+		Schema: hcl.BodySchema{
+			Blocks: []hcl.BlockHeaderSchema{
+				{
+					Type:       "component2",
 					LabelNames: []string{"name"},
 				},
 			},

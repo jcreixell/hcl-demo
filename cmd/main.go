@@ -34,12 +34,13 @@ component2 "yo3" {
 // -------- Component Interfaces -----------
 
 type ComponentConfig interface{}
+type ComponentExports map[string]cty.Value
 
 type Component interface {
 	GetName() string
 	Update(string, ComponentConfig)
 	Run()
-	Exports() map[string]cty.Value
+	GetExports() ComponentExports
 }
 
 // ----------- Component 1 --------------
@@ -49,72 +50,100 @@ type Component1Config struct {
 }
 
 type Component1 struct {
-	Name   string
-	Config Component1Config
+	Name    string
+	Config  Component1Config
+	Exports ComponentExports
 }
 
 func (c *Component1) Update(Name string, config ComponentConfig) {
 	c.Name = Name
 	c.Config = config.(Component1Config)
-}
 
-func (c *Component1) GetName() string {
-	return c.Name
-}
-
-func (c *Component1) Run() {
-	fmt.Printf("Running component1: Name -> %s, Config -> %v, Exports -> %v\n", c.Name, c.Config, c.Exports())
-}
-
-func (c *Component1) Exports() map[string]cty.Value {
 	// TODO: use cty tags to automatically export full "Exports" struct
 	enabledType, err := gocty.ImpliedType(c.Config.Enabled)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	c.Exports = map[string]cty.Value{}
+
 	val, _ := gocty.ToCtyValue(c.Config.Enabled, enabledType)
-	return map[string]cty.Value{
+	c.Exports = map[string]cty.Value{
 		"enabled": val,
 	}
+}
+
+func (c *Component1) GetName() string {
+	return c.Name
+}
+
+func (c *Component1) GetExports() ComponentExports {
+	return c.Exports
+}
+
+func (c *Component1) Run() {
+	fmt.Printf("Running component1: Name -> %s, Config -> %v, Exports -> %v\n", c.Name, c.Config, c.GetExports())
 }
 
 // ----------- Component 2 --------------
 
 type Component2Config struct {
-	Enabled        bool      `hcl:"enabled,optional"`
-	Message        string    `hcl:"message,optional"`
-	InputChannel   cty.Value `hcl:"channel,optional"`
-	OutputChannel  cty.Value
-	InputFunction  cty.Value `hcl:"function,optional"`
-	OutputFunction cty.Value
+	Enabled       bool      `hcl:"enabled,optional"`
+	Message       string    `hcl:"message,optional"`
+	InputChannel  cty.Value `hcl:"channel,optional"`
+	InputFunction cty.Value `hcl:"function,optional"`
 }
 
 type Component2 struct {
-	Name   string
-	Config Component2Config
+	Name    string
+	Config  Component2Config
+	Exports ComponentExports
 }
 
 func (c *Component2) Update(Name string, config ComponentConfig) {
 	c.Name = Name
 	c.Config = config.(Component2Config)
+
 	outchannel := make(chan string, 100)
 	chanty := cty.Capsule("outchannel", reflect.ChanOf(reflect.BothDir, reflect.TypeOf("")))
-	c.Config.OutputChannel = cty.CapsuleVal(chanty, &outchannel)
+
+	c.Exports = map[string]cty.Value{}
+
+	c.Exports["channel"] = cty.CapsuleVal(chanty, &outchannel)
 
 	f := func() string {
 		return fmt.Sprintf("hello from %v", c.Name)
 	}
 	functy := cty.Capsule("outfunc", reflect.FuncOf(nil, []reflect.Type{reflect.TypeOf("")}, false))
-	c.Config.OutputFunction = cty.CapsuleVal(functy, &f)
+	c.Exports["function"] = cty.CapsuleVal(functy, &f)
+
+	enabledType, err := gocty.ImpliedType(c.Config.Enabled)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	messageType, err := gocty.ImpliedType(c.Config.Message)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	enabled, _ := gocty.ToCtyValue(c.Config.Enabled, enabledType)
+	message, _ := gocty.ToCtyValue(c.Config.Message, messageType)
+
+	c.Exports["enabled"] = enabled
+	c.Exports["message"] = message
 }
 
 func (c *Component2) GetName() string {
 	return c.Name
 }
 
+func (c *Component2) GetExports() ComponentExports {
+	return c.Exports
+}
+
 func (c *Component2) Run() {
-	fmt.Printf("Running component2: Name -> %s, Config -> %v, Exports -> %v\n", c.Name, c.Config, c.Exports())
+	fmt.Printf("Running component2: Name -> %s, Config -> %v, Exports -> %v\n", c.Name, c.Config, c.Exports)
 	if !c.Config.InputChannel.IsNull() {
 		inChannel := c.Config.InputChannel.EncapsulatedValue().(*chan string)
 		go func() {
@@ -139,8 +168,8 @@ func (c *Component2) Run() {
 
 	}
 
-	if !c.Config.OutputChannel.IsNull() {
-		outChannel := c.Config.OutputChannel.EncapsulatedValue().(*chan string)
+	if !c.Exports["channel"].IsNull() {
+		outChannel := c.Exports["channel"].EncapsulatedValue().(*chan string)
 
 		go func() {
 			for {
@@ -150,28 +179,6 @@ func (c *Component2) Run() {
 			}
 		}()
 
-	}
-}
-
-func (c *Component2) Exports() map[string]cty.Value {
-	enabledType, err := gocty.ImpliedType(c.Config.Enabled)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	messageType, err := gocty.ImpliedType(c.Config.Message)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	enabled, _ := gocty.ToCtyValue(c.Config.Enabled, enabledType)
-	message, _ := gocty.ToCtyValue(c.Config.Message, messageType)
-
-	return map[string]cty.Value{
-		"enabled":  enabled,
-		"message":  message,
-		"channel":  c.Config.OutputChannel,
-		"function": c.Config.OutputFunction,
 	}
 }
 
@@ -275,7 +282,7 @@ func main() {
 		component.Update(block.Labels[0], reflect.ValueOf(componentConfig).Elem().Interface())
 		components = append(components, component)
 
-		for name, attr := range component.Exports() {
+		for name, attr := range component.GetExports() {
 			ctx.Variables[fmt.Sprintf("%v_%v_exports_%v", componentNode.ID, component.GetName(), name)] = attr
 		}
 	}

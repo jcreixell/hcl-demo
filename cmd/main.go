@@ -27,6 +27,7 @@ component2 "yo3" {
 	enabled = !component1_yo_exports_enabled
 	message = "hi!"
 	channel = component2_yo2_exports_channel
+	function = component2_yo2_exports_function
 }
 `
 
@@ -81,10 +82,12 @@ func (c *Component1) Exports() map[string]cty.Value {
 // ----------- Component 2 --------------
 
 type Component2Config struct {
-	Enabled       bool      `hcl:"enabled,optional"`
-	Message       string    `hcl:"message,optional"`
-	InputChannel  cty.Value `hcl:"channel,optional"`
-	OutputChannel cty.Value
+	Enabled        bool      `hcl:"enabled,optional"`
+	Message        string    `hcl:"message,optional"`
+	InputChannel   cty.Value `hcl:"channel,optional"`
+	OutputChannel  cty.Value
+	InputFunction  cty.Value `hcl:"function,optional"`
+	OutputFunction cty.Value
 }
 
 type Component2 struct {
@@ -96,8 +99,14 @@ func (c *Component2) Update(Name string, config ComponentConfig) {
 	c.Name = Name
 	c.Config = config.(Component2Config)
 	outchannel := make(chan string, 100)
-	ty := cty.Capsule("outchannel", reflect.ChanOf(reflect.BothDir, reflect.TypeOf("")))
-	c.Config.OutputChannel = cty.CapsuleVal(ty, &outchannel)
+	chanty := cty.Capsule("outchannel", reflect.ChanOf(reflect.BothDir, reflect.TypeOf("")))
+	c.Config.OutputChannel = cty.CapsuleVal(chanty, &outchannel)
+
+	f := func() string {
+		return fmt.Sprintf("hello from %v", c.Name)
+	}
+	functy := cty.Capsule("outfunc", reflect.FuncOf(nil, []reflect.Type{reflect.TypeOf("")}, false))
+	c.Config.OutputFunction = cty.CapsuleVal(functy, &f)
 }
 
 func (c *Component2) GetName() string {
@@ -117,6 +126,17 @@ func (c *Component2) Run() {
 
 			}
 		}()
+	}
+
+	if !c.Config.InputFunction.IsNull() {
+		inFunction := c.Config.InputFunction.EncapsulatedValue().(*func() string)
+		go func() {
+			for {
+				fmt.Printf("%v: Calling function -> %s\n", c.Name, (*inFunction)())
+				time.Sleep(1 * time.Second)
+			}
+		}()
+
 	}
 
 	if !c.Config.OutputChannel.IsNull() {
@@ -148,9 +168,10 @@ func (c *Component2) Exports() map[string]cty.Value {
 	message, _ := gocty.ToCtyValue(c.Config.Message, messageType)
 
 	return map[string]cty.Value{
-		"enabled": enabled,
-		"message": message,
-		"channel": c.Config.OutputChannel,
+		"enabled":  enabled,
+		"message":  message,
+		"channel":  c.Config.OutputChannel,
+		"function": c.Config.OutputFunction,
 	}
 }
 
